@@ -102,7 +102,9 @@ def publish_to_github():
         ["git", "add", "-A"],
         ["git", "-c", "user.name=PipersFriend Dev", "-c", "user.email=dev@pipersfriend.local",
          "commit", "--allow-empty", "-m", "Publish local build via dev console"],
-        ["git", "push", "-f", remote, "%s:%s" % (branch, branch)],
+        # credential.helper= disables Git Credential Manager so the token in the
+        # URL is actually used (otherwise Windows may inject a cached login).
+        ["git", "-c", "credential.helper=", "push", "-f", remote, "%s:%s" % (branch, branch)],
     ]
     for args in steps:
         res = _run(args)

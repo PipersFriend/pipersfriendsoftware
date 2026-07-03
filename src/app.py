@@ -9,12 +9,21 @@ class PipersFriendApp:
     def __init__(self, root):
         self.root = root
         self.settings = load_settings()
-        self.root.title("Piper's Friend - Ribbon Studio")
+        self.root.title("Taorluath")
         self.root.geometry("1220x760")
+        try:
+            icon_path = os.path.join(BASE_DIR, "Assets", "menu", "pf-small.png")
+            if os.path.exists(icon_path):
+                self._app_icon = ImageTk.PhotoImage(Image.open(icon_path))
+                self.root.iconphoto(True, self._app_icon)
+        except Exception:
+            pass
 
         self.score = BagpipeScore()
         self.selected_duration = "Quarter"
         self.selected_embellishment = None
+        self.drum_rimshot = False          # next drum note is a rimshot (sticks/side)
+        self.placing_rest = False          # placing rests rather than notes
         self.selected_instrument = self.settings.get("default_instrument", "GHB")
         self.active_tab = "File"
         self.is_playing = False
@@ -126,7 +135,7 @@ class PipersFriendApp:
         self.activation_frame = tk.Frame(self.root, bg=bg)
         self.activation_frame.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(self.activation_frame, text="The Piper's Friend", fg=self.accent, bg=bg,
+        tk.Label(self.activation_frame, text="Taorluath", fg=self.accent, bg=bg,
                  font=("Arial", 26, "bold")).pack(pady=(64, 10))
         tk.Label(self.activation_frame, text="Enter your email and activation key to continue.",
                  fg=self.theme["fg"], bg=bg, font=("Arial", 13)).pack(pady=4)
@@ -158,7 +167,7 @@ class PipersFriendApp:
                                            font=("Arial", 10))
         self._activation_status.pack(pady=6)
         tk.Label(self.activation_frame,
-                 text="Don't have a key? Purchase one to unlock The Piper's Friend.",
+                 text="Don't have a key? Purchase one to unlock Taorluath.",
                  fg=self.theme["muted"], bg=bg, font=("Arial", 9)).pack(pady=(24, 0))
 
     def _do_activate(self):
@@ -224,7 +233,7 @@ class PipersFriendApp:
             tk.Button(topbar, text="⚙ Settings", bg=self.theme["panel"], fg=self.theme["fg"],
                       command=self.open_settings_dialog).pack(side=tk.RIGHT, padx=12, pady=10)
 
-        lbl_title = tk.Label(self.home_frame, text="Piper's Friend Workspace", fg=self.accent, bg=bg, font=("Arial", 24, "bold"))
+        lbl_title = tk.Label(self.home_frame, text="Taorluath Workspace", fg=self.accent, bg=bg, font=("Arial", 24, "bold"))
         lbl_title.pack(pady=(10, 30))
 
         btn_frame = tk.Frame(self.home_frame, bg=bg)
@@ -233,6 +242,10 @@ class PipersFriendApp:
         tk.Button(btn_frame, text="New Score Layout", bg="#16a34a", fg="white", font=("Arial", 11, "bold"), width=18, height=2, command=self.action_create_tune).pack(side=tk.LEFT, padx=10)
         tk.Button(btn_frame, text="Open Existing Score", bg="#2563eb", fg="white", font=("Arial", 11, "bold"), width=18, height=2, command=self.action_open_file_dialog).pack(side=tk.LEFT, padx=10)
         tk.Button(btn_frame, text="Import BWW", bg="#3f3f46", fg="white", font=("Arial", 11, "bold"), width=18, height=2, command=self.action_import_bww).pack(side=tk.LEFT, padx=10)
+
+        # Drum-score button sits on its own along the very bottom.
+        tk.Button(self.home_frame, text="🥁 New Drum Score", bg="#7c3aed", fg="white",
+                  font=("Arial", 10, "bold"), command=self.action_write_drums).pack(side=tk.BOTTOM, pady=10)
 
         self._build_my_scores(self.home_frame)
 
@@ -273,9 +286,13 @@ class PipersFriendApp:
         except OSError:
             names = []
         for fn in names:
-            if fn.lower().endswith(".pipe"):
+            low = fn.lower()
+            if low.endswith(".pipe"):
                 self._score_files.append(os.path.join(DATA_DIR, fn))
                 self.scores_listbox.insert(tk.END, "  " + fn[:-5])
+            elif low.endswith(".drum"):
+                self._score_files.append(os.path.join(DATA_DIR, fn))
+                self.scores_listbox.insert(tk.END, "  🥁 " + fn[:-5])
         if not self._score_files:
             self.scores_listbox.insert(tk.END, "  (no saved scores yet)")
 
@@ -298,7 +315,9 @@ class PipersFriendApp:
 
     def action_open_file_dialog(self):
         path = filedialog.askopenfilename(initialdir=DATA_DIR,
-                                          filetypes=[("Standard Pipe Files", "*.pipe")])
+                                          filetypes=[("Pipe / Drum scores", "*.pipe *.drum"),
+                                                     ("Standard Pipe Files", "*.pipe"),
+                                                     ("Drum Scores", "*.drum")])
         if not path: return
         self.open_score_file(path)
 
@@ -428,7 +447,8 @@ class PipersFriendApp:
         self.show_editor_screen()
 
     def action_save_changes(self):
-        safe_filename = "".join(c for c in self.score.title if c.isalnum() or c in (' ', '_', '-')).rstrip() + ".pipe"
+        ext = ".drum" if getattr(self.score, "mode", "pipe") == "drum" else ".pipe"
+        safe_filename = self._safe_title() + ext
         out_path = os.path.join(DATA_DIR, safe_filename)
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(self.score.to_pipe_format())
@@ -559,6 +579,17 @@ class PipersFriendApp:
         self.canvas.bind("<MouseWheel>", self._on_mousewheel)
         self.canvas.bind("<Control-MouseWheel>", self._on_ctrl_wheel)
 
+        # Mode-switch button along the very bottom.
+        bottombar = tk.Frame(self.editor_frame, bg="#18181b")
+        bottombar.pack(fill=tk.X, side=tk.BOTTOM)
+        if self._is_drum():
+            switch_text, switch_cmd = "🎼 Write to pipes instead", self.action_create_tune
+        else:
+            switch_text, switch_cmd = "🥁 Write to drums instead", self.action_write_drums
+        tk.Button(bottombar, text=switch_text, bg="#7c3aed", fg="white", bd=0,
+                  font=("Arial", 9, "bold"), activebackground="#6d28d9",
+                  command=switch_cmd).pack(side=tk.RIGHT, padx=8, pady=3)
+
         self.status_label = tk.Label(self.editor_frame, text="", bg="#18181b", fg="#f87171", font=("Arial", 10, "italic"))
         self.status_label.pack(fill=tk.X, side=tk.BOTTOM, pady=2)
 
@@ -605,8 +636,13 @@ class PipersFriendApp:
             self.editor_frame.destroy()
         self.show_home_screen()
 
+    def _is_drum(self):
+        return getattr(self.score, "mode", "pipe") == "drum"
+
     def setup_ribbon_tab_buttons(self):
-        tabs = ["File", "Notes", "Embellishments", "Stave", "Bar", "Playback", "Settings"]
+        # In drum mode the Embellishments tab is replaced by a Rests tab.
+        second = "Rests" if self._is_drum() else "Embellishments"
+        tabs = ["File", "Notes", second, "Stave", "Bar", "Playback", "Settings"]
         self.ribbon_buttons = {}
         for tab in tabs:
             btn = tk.Button(self.ribbon_tabs_container, text=tab, bg="#27272a", fg="#d4d4d8", relief=tk.FLAT,
@@ -647,13 +683,34 @@ class PipersFriendApp:
             notes = ["Whole", "Half", "Quarter", "Quaver", "Semiquaver", "Demisemiquaver", "Hemidemisemiquaver"]
             for n in notes:
                 lbl = f"{n} Note" if "Note" not in n else n
-                b_color = "#2563eb" if (self.selected_duration == n and self.selected_embellishment is None) else "#3f3f46"
+                b_color = "#2563eb" if (self.selected_duration == n and self.selected_embellishment is None
+                                        and not self.drum_rimshot and not self.placing_rest) else "#3f3f46"
                 tk.Button(self.ribbon_subpanel, text=lbl, bg=b_color, fg="white",
                           command=lambda target=n: self.set_active_note_type(target)).pack(side=tk.LEFT, padx=3, pady=5)
             tk.Button(self.ribbon_subpanel, text="Dot Selected Note", bg="#3f3f46", fg="white",
                       command=self.action_dot_selected).pack(side=tk.LEFT, padx=(12, 3), pady=5)
-            tk.Button(self.ribbon_subpanel, text="Tie Selected Note", bg="#3f3f46", fg="white",
-                      command=self.action_tie_selected).pack(side=tk.LEFT, padx=3, pady=5)
+            if self._is_drum():
+                col = "#7c3aed" if self.drum_rimshot else "#3f3f46"
+                tk.Button(self.ribbon_subpanel, text="Rimshot", bg=col, fg="white",
+                          command=self.toggle_rimshot).pack(side=tk.LEFT, padx=3, pady=5)
+                tk.Frame(self.ribbon_subpanel, width=12, bg="#202023").pack(side=tk.LEFT)
+                tk.Label(self.ribbon_subpanel, text="Drum:", fg="white", bg="#202023").pack(side=tk.LEFT, padx=(4, 2))
+                dv = tk.StringVar(value=self.score.drum_voice)
+                m = tk.OptionMenu(self.ribbon_subpanel, dv, "Snare", "Tenor", "Bass",
+                                  command=self.set_drum_voice)
+                m.config(bg="#3f3f46", fg="white", highlightthickness=0)
+                m.pack(side=tk.LEFT, padx=2, pady=5)
+            else:
+                tk.Button(self.ribbon_subpanel, text="Tie Selected Note", bg="#3f3f46", fg="white",
+                          command=self.action_tie_selected).pack(side=tk.LEFT, padx=3, pady=5)
+
+        elif tab_name == "Rests":
+            tk.Label(self.ribbon_subpanel, text="Rest:", fg="white", bg="#202023").pack(side=tk.LEFT, padx=(8, 4))
+            for n in ["Whole", "Half", "Quarter", "Quaver", "Semiquaver", "Demisemiquaver"]:
+                active = (self.placing_rest and self.selected_duration == n)
+                col = "#2563eb" if active else "#3f3f46"
+                tk.Button(self.ribbon_subpanel, text=n, bg=col, fg="white",
+                          command=lambda target=n: self.set_active_rest(target)).pack(side=tk.LEFT, padx=3, pady=5)
 
         elif tab_name == "Embellishments":
             graces = [("Gracenote", None), ("Doubling", "doubling"), ("D Throw", "d_throw"),
@@ -717,11 +774,18 @@ class PipersFriendApp:
                               command=lambda v=val: self.set_bar_timing(v)).pack(side=tk.LEFT, padx=2, pady=5)
 
         elif tab_name == "Playback":
-            tk.Label(self.ribbon_subpanel, text="Instrument:", fg="white", bg="#202023").pack(side=tk.LEFT, padx=(6, 2))
-            for label, key in (("Bagpipe", "GHB"), ("Practice Chanter", "chanter")):
-                active = (self.selected_instrument == key)
-                tk.Button(self.ribbon_subpanel, text=label, bg=("#2563eb" if active else "#3f3f46"),
-                          fg="white", command=lambda k=key: self.set_instrument(k)).pack(side=tk.LEFT, padx=2, pady=5)
+            if self._is_drum():
+                tk.Label(self.ribbon_subpanel, text="Drum:", fg="white", bg="#202023").pack(side=tk.LEFT, padx=(6, 2))
+                for voice in ("Bass", "Tenor", "Snare"):
+                    active = (self.score.drum_voice == voice)
+                    tk.Button(self.ribbon_subpanel, text=voice, bg=("#2563eb" if active else "#3f3f46"),
+                              fg="white", command=lambda v=voice: self.pick_drum_voice(v)).pack(side=tk.LEFT, padx=2, pady=5)
+            else:
+                tk.Label(self.ribbon_subpanel, text="Instrument:", fg="white", bg="#202023").pack(side=tk.LEFT, padx=(6, 2))
+                for label, key in (("Bagpipe", "GHB"), ("Practice Chanter", "chanter")):
+                    active = (self.selected_instrument == key)
+                    tk.Button(self.ribbon_subpanel, text=label, bg=("#2563eb" if active else "#3f3f46"),
+                              fg="white", command=lambda k=key: self.set_instrument(k)).pack(side=tk.LEFT, padx=2, pady=5)
             tk.Frame(self.ribbon_subpanel, width=14, bg="#202023").pack(side=tk.LEFT)
             tk.Button(self.ribbon_subpanel, text="▶ Play Entire Score", bg="#16a34a", fg="white", command=self.audio_play_stream).pack(side=tk.LEFT, padx=4, pady=5)
             tk.Button(self.ribbon_subpanel, text="Play from Selected Note", bg="#3f3f46", fg="white", command=lambda: self.audio_play_stream(mode="note")).pack(side=tk.LEFT, padx=4, pady=5)
@@ -746,6 +810,7 @@ class PipersFriendApp:
     def set_active_note_type(self, dur):
         self.selected_duration = dur
         self.selected_embellishment = None
+        self.placing_rest = False
         # If a note is selected, change it to the chosen duration as well.
         node = self._selected_normal_node()
         if node is not None:
@@ -755,6 +820,35 @@ class PipersFriendApp:
             self.recalculate_note_horizontal_positions()
             self.redraw_canvas_score()
         self.activate_ribbon_tab("Notes")
+
+    def toggle_rimshot(self):
+        self.drum_rimshot = not self.drum_rimshot
+        self.placing_rest = False
+        self.activate_ribbon_tab("Notes")
+
+    def set_drum_voice(self, voice):
+        self.score.drum_voice = voice
+
+    def pick_drum_voice(self, voice):
+        self.score.drum_voice = voice
+        self.activate_ribbon_tab("Playback")   # refresh the active highlight
+
+    def set_active_rest(self, dur):
+        self.placing_rest = True
+        self.selected_duration = dur
+        self.selected_embellishment = None
+        self.drum_rimshot = False
+        self.activate_ribbon_tab("Rests")
+
+    def action_write_drums(self):
+        """Start a fresh drum score (Berger uniline)."""
+        self.score = BagpipeScore(title="Untitled Drum Score",
+                                  tempo=int(self.settings.get("default_tempo", 90)))
+        self.score.mode = "drum"
+        self.score.num_staves = 1          # single uniline stave
+        self.placing_rest = False
+        self.drum_rimshot = False
+        self.show_editor_screen()
 
     def set_instrument(self, key):
         self.selected_instrument = key
@@ -1038,6 +1132,33 @@ class PipersFriendApp:
                 self.render_canvas_interactive_overlay()  # show the selection outline
             return
 
+        # --- Drum mode: place a beat, a rimshot, or a rest on the uniline. ----
+        if self._is_drum():
+            if self.active_tab not in ("Notes", "Rests"):
+                return
+            staff_num = band_staff if band_staff is not None else 1
+            clicked_bar_idx = self.get_bar_index_from_x(x, staff_num)
+            if clicked_bar_idx < 0:
+                return
+            dur = self.selected_duration
+            # Above or below the uniline, chosen by which side of the line you click.
+            uni = self._staff_base_y(staff_num) + 2 * LINE_GAP
+            side = "above" if y < uni else "below"
+            node = {"id": str(uuid.uuid4())[:8], "pitch": "beat",
+                    "dur_type": "rest" if self.placing_rest else dur.lower(),
+                    "duration": NOTE_DURATIONS[dur]["val"],
+                    "staff": staff_num, "bar_index": clicked_bar_idx,
+                    "side": side, "raw_x": x, "seq": self._next_seq()}
+            if self.placing_rest:
+                node["rest"] = True
+                node["rest_dur_type"] = dur.lower()
+            elif self.drum_rimshot:
+                node["rimshot"] = True
+            self.score.nodes.append(node)
+            self.recalculate_note_horizontal_positions()
+            self.redraw_canvas_score()
+            return
+
         # Notes are only placed while the Notes or Embellishments tab is open.
         if self.active_tab not in ("Notes", "Embellishments"):
             return
@@ -1193,6 +1314,16 @@ class PipersFriendApp:
         ew = max(1, int(STAFF_LINE_W * 1.4 * scale))      # left/right edge lines
         blw = max(1, int(STAFF_LINE_W * 0.6 * scale))     # internal bar separators (thinner)
         ink = (24, 24, 27, 255)
+        if self._is_drum():
+            # Berger uniline: one line, with bar ticks spanning a short height.
+            mid = base_y + 2 * LINE_GAP
+            top_y, bot_y = base_y + LINE_GAP, base_y + 3 * LINE_GAP
+            draw.line([CANVAS_LEFT * scale, mid * scale, CANVAS_RIGHT * scale, mid * scale], fill=ink, width=lw)
+            draw.line([CANVAS_LEFT * scale, top_y * scale, CANVAS_LEFT * scale, bot_y * scale], fill=ink, width=ew)
+            draw.line([CANVAS_RIGHT * scale, top_y * scale, CANVAS_RIGHT * scale, bot_y * scale], fill=ink, width=ew)
+            for end in self.score.bar_lines[staff]:
+                draw.line([end * scale, top_y * scale, end * scale, bot_y * scale], fill=(113, 113, 122, 255), width=blw)
+            return
         for i in range(5):
             line_y = (base_y + (i * LINE_GAP)) * scale
             draw.line([CANVAS_LEFT * scale, line_y, CANVAS_RIGHT * scale, line_y], fill=ink, width=lw)
@@ -1360,22 +1491,36 @@ class PipersFriendApp:
             self.draw_staff_background_grid(draw, base_y, scale, staff_num)
             self._draw_bar_styles(hr_image, base_y, scale, staff_num)
             self._draw_timings(draw, base_y, scale, staff_num)
-            if clef_r is not None:
+            drum = self._is_drum()
+            if clef_r is not None and not drum:            # drums have no clef
                 top = (base_y + 3 * LINE_GAP) - CLEF_CURL_FRAC * (6.0 * LINE_GAP)
                 hr_image.paste(clef_r, (clef_x, int(top * scale)), clef_r)
             ts = self.score.time_sig_for(staff_num)
-            cursor = clef_left + clef_w + 6
+            cursor = (CANVAS_LEFT + 16) if drum else (clef_left + clef_w + 6)
             if staff_num == first_staff:
-                # Key signature only after the first clef, then the time signature.
-                cursor = self._draw_key_signature(hr_image, base_y, scale, cursor)
+                if not drum:                               # key signature only in pipe mode
+                    cursor = self._draw_key_signature(hr_image, base_y, scale, cursor)
                 self._draw_time_signature(hr_image, base_y, scale, ts, cursor)
             elif ts != prev_ts:
                 # A later stave shows its time signature only when it changes.
                 self._draw_time_signature(hr_image, base_y, scale, ts, cursor)
             prev_ts = ts
 
-        # Position every node by its pitch on the appropriate staff.
+        # Position every node by its pitch on the appropriate staff. In drum mode
+        # everything sits on the single uniline.
+        drum_mode = self._is_drum()
         for node in self.score.nodes:
+            if drum_mode:
+                node["render_x"] = node.get("raw_x", 140)
+                uni = self._staff_base_y(node.get("staff", 1)) + 2 * LINE_GAP
+                if node.get("rest"):
+                    node["render_y"] = uni
+                else:
+                    # Notes straddle the line: head resting directly on it (above)
+                    # or directly under it (below) - half a notehead off the line.
+                    off = NOTE_HEAD_W // 2
+                    node["render_y"] = uni - off if node.get("side", "above") == "above" else uni + off
+                continue
             pitch_cfg = next((p for p in CHANTER_SCALE if p["name"] == node["pitch"]), None)
             if not pitch_cfg: continue
             node["render_x"] = node.get("raw_x", 140)
@@ -1592,6 +1737,10 @@ class PipersFriendApp:
     def _draw_single_note(self, hr_image, draw, node, scale):
         """Draw one melody note straight from its PNG glyph (stem/flag baked in)."""
         color_tuple = self._node_color(node)
+        if node.get("rest"):
+            self._draw_rest(draw, node, scale, color_tuple)
+            self._draw_dot(draw, node, scale)
+            return
         pitch_cfg = next((p for p in CHANTER_SCALE if p["name"] == node["pitch"]), None)
         if pitch_cfg and pitch_cfg["y_offset"] <= -LINE_GAP:  # ledger line for High A
             draw.line([(node["render_x"] - 10) * scale, node["render_y"] * scale,
@@ -1599,6 +1748,39 @@ class PipersFriendApp:
                       fill=(24, 24, 27, 255), width=int(1.5 * scale))
         self._paste_note_asset(hr_image, draw, node, color_tuple, scale)
         self._draw_dot(draw, node, scale)
+        if node.get("rimshot"):
+            # Mark a rimshot with a small "x" above the notehead.
+            cx, cy = node["render_x"], node["render_y"] - LINE_GAP - 4
+            r = 3
+            draw.line([(cx - r) * scale, (cy - r) * scale, (cx + r) * scale, (cy + r) * scale],
+                      fill=color_tuple, width=max(1, int(1.4 * scale)))
+            draw.line([(cx - r) * scale, (cy + r) * scale, (cx + r) * scale, (cy - r) * scale],
+                      fill=color_tuple, width=max(1, int(1.4 * scale)))
+
+    def _draw_rest(self, draw, node, scale, color):
+        """Draw a stylised rest centred on the uniline, sized by duration."""
+        x = node["render_x"]
+        y = node.get("render_y", self._staff_base_y(node.get("staff", 1)) + 2 * LINE_GAP)
+        dur = node.get("rest_dur_type", node.get("dur_type", "quarter"))
+        w = max(1, int(3 * scale))
+        if dur in ("whole", "half"):
+            # A hanging (whole) or sitting (half) block on the line.
+            bx0, bx1 = (x - 6) * scale, (x + 6) * scale
+            if dur == "whole":
+                by0, by1 = (y - 6) * scale, y * scale
+            else:
+                by0, by1 = y * scale, (y + 6) * scale
+            draw.rectangle([bx0, by0, bx1, by1], fill=color)
+            return
+        # Quarter and shorter: a slanted body plus a flag dot per extra beam.
+        draw.line([(x - 4) * scale, (y - 8) * scale, (x + 4) * scale, (y + 8) * scale],
+                  fill=color, width=max(2, int(2.4 * scale)))
+        draw.line([(x + 4) * scale, (y + 8) * scale, (x - 2) * scale, (y + 12) * scale],
+                  fill=color, width=max(2, int(2.4 * scale)))
+        flags = {"quaver": 1, "semiquaver": 2, "demisemiquaver": 3, "hemidemisemiquaver": 4}.get(dur, 0)
+        for i in range(flags):
+            fy = (y - 6 + i * 4)
+            draw.ellipse([(x + 2) * scale, (fy - 2) * scale, (x + 6) * scale, (fy + 2) * scale], fill=color)
 
     def _eff_dur(self, node):
         """Effective duration including a dot (a dot adds half the value)."""
@@ -1909,6 +2091,7 @@ class PipersFriendApp:
         # be placed. Only shown while a placeable tool is active (Notes/Embellishments
         # tab); otherwise it disappears.
         if (self.hover_x is not None and self.hover_y is not None
+                and not self._is_drum()
                 and self.active_tab in ("Notes", "Embellishments")):
             staff_num, base_y, p_target = self.identify_closest_staff_and_pitch(self.hover_y)
             if staff_num is not None:
@@ -2131,6 +2314,87 @@ class PipersFriendApp:
             pass
         self.root.after(0, self.redraw_canvas_score)
 
+    @staticmethod
+    def _decode_wav_any(path):
+        """Decode a WAV to (mono array('h'), framerate). Handles PCM 16/24/32-bit,
+        IEEE float 32/64-bit and WAVE_FORMAT_EXTENSIBLE - Python's stdlib ``wave``
+        chokes on the latter two, which user-supplied drum samples often use."""
+        import struct
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except Exception:
+            return None, 44100
+        if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+            return None, 44100
+        pos, fmt, body_data = 12, None, None
+        while pos + 8 <= len(data):
+            cid = data[pos:pos + 4]
+            size = struct.unpack("<I", data[pos + 4:pos + 8])[0]
+            body = data[pos + 8:pos + 8 + size]
+            if cid == b"fmt ":
+                fmt = body
+            elif cid == b"data":
+                body_data = body
+            pos += 8 + size + (size & 1)
+        if fmt is None or body_data is None or len(fmt) < 16:
+            return None, 44100
+        afmt, nch, fr, _br, _ba, bits = struct.unpack("<HHIIHH", fmt[:16])
+        if afmt == 0xFFFE and len(fmt) >= 26:            # extensible -> real subformat
+            afmt = struct.unpack("<H", fmt[24:26])[0]
+        try:
+            if afmt == 1 and bits == 16:
+                raw = array.array("h"); raw.frombytes(body_data[:len(body_data) // 2 * 2])
+                chans = raw
+            elif afmt == 1 and bits == 32:
+                raw = array.array("i"); raw.frombytes(body_data[:len(body_data) // 4 * 4])
+                chans = array.array("h", (v >> 16 for v in raw))
+            elif afmt == 1 and bits == 24:
+                n = len(body_data) // 3
+                chans = array.array("h")
+                for i in range(n):
+                    v = body_data[3 * i] | (body_data[3 * i + 1] << 8) | (body_data[3 * i + 2] << 16)
+                    if v & 0x800000:
+                        v -= 0x1000000
+                    chans.append(v >> 8)
+            elif afmt == 3:                              # IEEE float
+                fl = array.array("f" if bits == 32 else "d")
+                step = 4 if bits == 32 else 8
+                fl.frombytes(body_data[:len(body_data) // step * step])
+                chans = array.array("h", (32767 if x > 1 else (-32768 if x < -1 else int(x * 32767)) for x in fl))
+            else:
+                return None, fr
+        except Exception:
+            return None, fr
+        if nch == 2:
+            chans = array.array("h", chans[0::2])         # down-mix to mono (left)
+        return chans, fr
+
+    def _load_drum_sample(self, kind):
+        """Amplified 16-bit mono samples for a drum voice ('snare'/'tenor'/'bass')
+        or 'rimshot', cached. No warm-up skip - these are short one-shots.
+        Returns ``(array('h') | None, framerate)``."""
+        key = ("__drum__", kind)
+        if key in self._wav_cache:
+            return self._wav_cache[key]
+        result = (None, 44100)
+        src = self._asset_path("drums", kind + ".wav")
+        if os.path.exists(src):
+            samples, fr = self._decode_wav_any(src)
+            if samples:
+                peak = max((abs(s) for s in samples), default=0)
+                if peak > 0:
+                    vol = float(self.settings.get("volume", 200)) / 100.0
+                    target = min(2.5, 0.92 * vol)
+                    gain = min(25.0, (target * 32767.0) / peak)
+                    if gain > 1.02:
+                        lo, hi = -32768, 32767
+                        samples = array.array("h", (hi if (v := int(s * gain)) > hi
+                                                    else (lo if v < lo else v) for s in samples))
+                result = (samples, fr)
+        self._wav_cache[key] = result
+        return result
+
     def _load_samples(self, pitch):
         """Trimmed + amplified 16-bit mono samples for a pitch on the selected
         instrument, cached. Returns ``(array('h') | None, framerate)``."""
@@ -2213,31 +2477,51 @@ class PipersFriendApp:
             crotchet = NOTE_DURATIONS["Quarter"]["val"]
             grace_dur = NOTE_DURATIONS["Hemidemisemiquaver"]["val"]   # 1/64
 
-            # Concatenate every note's audio into ONE continuous track. This way
-            # each note rings right up to the start of the next (no reload gap),
-            # and grace notes flow into the next note with no cooldown.
             out = array.array("h")
             schedule = []   # (duration_ms, node_id) for the visual highlight
             fr = 44100
-            for node in nodes:
-                samples, sr = self._load_samples(node["pitch"])
-                if not samples:
-                    continue
-                fr = sr
-                dur = grace_dur if node["dur_type"] == "gracenote" else self._eff_dur(node)
-                ms = max(1, int((dur / crotchet) * beat_ms))
-                nframes = max(1, int(sr * ms / 1000.0))
-                if len(samples) >= nframes:
-                    chunk = samples[:nframes]
-                else:                                   # tile a short sample to fill
-                    chunk = (samples * (nframes // len(samples) + 1))[:nframes]
-                out.extend(chunk)
-                # A gracenote highlights the note it's attached to, not itself.
-                if node["dur_type"] == "gracenote":
-                    hl = node.get("target_normal_id") or node["id"]
-                else:
-                    hl = node["id"]
-                schedule.append((ms, hl))
+
+            if self._is_drum():
+                # Each note = ONE drum hit, then silence for the rest of its slot.
+                # Beats are never sustained or carried into the next note.
+                voice = getattr(self.score, "drum_voice", "Snare").lower()
+                _vs, base_fr = self._load_drum_sample(voice)
+                fr = base_fr or 44100
+                for node in nodes:
+                    ms = max(1, int((self._eff_dur(node) / crotchet) * beat_ms))
+                    nframes = max(1, int(fr * ms / 1000.0))
+                    if node.get("rest"):
+                        out.extend(array.array("h", [0]) * nframes)   # silence
+                    else:
+                        kind = "rimshot" if node.get("rimshot") else voice
+                        samples, _sr = self._load_drum_sample(kind)
+                        hit = samples[:nframes] if samples else array.array("h")
+                        out.extend(hit)
+                        if len(hit) < nframes:                        # pad, don't tile
+                            out.extend(array.array("h", [0]) * (nframes - len(hit)))
+                    schedule.append((ms, node["id"]))
+            else:
+                # Concatenate every note's audio into ONE continuous track, so each
+                # note rings up to the next (gapless) and graces flow in.
+                for node in nodes:
+                    samples, sr = self._load_samples(node["pitch"])
+                    if not samples:
+                        continue
+                    fr = sr
+                    dur = grace_dur if node["dur_type"] == "gracenote" else self._eff_dur(node)
+                    ms = max(1, int((dur / crotchet) * beat_ms))
+                    nframes = max(1, int(sr * ms / 1000.0))
+                    if len(samples) >= nframes:
+                        chunk = samples[:nframes]
+                    else:                                   # tile a short sample to fill
+                        chunk = (samples * (nframes // len(samples) + 1))[:nframes]
+                    out.extend(chunk)
+                    # A gracenote highlights the note it's attached to, not itself.
+                    if node["dur_type"] == "gracenote":
+                        hl = node.get("target_normal_id") or node["id"]
+                    else:
+                        hl = node["id"]
+                    schedule.append((ms, hl))
 
             if not out or not self.is_playing:
                 self.audio_stop_stream()

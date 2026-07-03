@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Piper's Friend - launcher.
+"""Taorluath - launcher.
 
 Compiles the src package and runs the app.
 Run with:  python main.py

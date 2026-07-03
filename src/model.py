@@ -21,6 +21,9 @@ class BagpipeScore:
         self.gap_after_gracenotes = 14
         self.selected_font = "Sans Serif"
         self.header_style = {k: dict(v) for k, v in DEFAULT_HEADER_STYLE.items()}
+        # "pipe" = bagpipe notation; "drum" = Berger uniline drum notation.
+        self.mode = "pipe"
+        self.drum_voice = "Snare"          # Snare / Tenor / Bass (drum mode only)
         self.nodes = []
         self.num_staves = 2
         # Each stave can carry its own time signature.
@@ -84,6 +87,8 @@ class BagpipeScore:
                 "header_style": self.header_style,
                 "num_staves": self.num_staves,
                 "stave_time_sigs": self.stave_time_sigs,
+                "mode": self.mode,
+                "drum_voice": self.drum_voice,
             },
             "bar_lines": self.bar_lines,
             "bar_styles": self.bar_styles,
@@ -99,6 +104,8 @@ class BagpipeScore:
         self.tempo = meta.get("tempo", 120)
         self.tune_type = meta.get("tune_type", "March")
         self.composer = meta.get("composer", "Unknown")
+        self.mode = meta.get("mode", "pipe")
+        self.drum_voice = meta.get("drum_voice", "Snare")
         self.gap_between_staves = meta.get("gap_between_staves", 100)
         self.gap_after_gracenotes = meta.get("gap_after_gracenotes", 14)
         self.selected_font = meta.get("selected_font", "Sans Serif")

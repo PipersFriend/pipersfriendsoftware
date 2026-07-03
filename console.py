@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Piper's Friend - developer console.
+"""Taorluath - developer console.
 
 Run this directly (``python console.py``) - it is NOT imported by main.py and is
 not reachable from the app. Access is gated by a password whose hash lives in
@@ -213,7 +213,7 @@ def validate_build():
 
 def main():
     print("=" * 52)
-    print("  The Piper's Friend - Developer Console")
+    print("  Taorluath - Developer Console")
     print("=" * 52)
     if not _authenticate():
         print("Access denied.")

@@ -120,6 +120,6 @@ def perform_update():
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             with zf.open(name) as src, open(dest, "wb") as out:
                 shutil.copyfileobj(src, out)
-        return True, "Update installed. Please restart The Piper's Friend."
+        return True, "Update installed. Please restart Taorluath."
     except Exception as exc:
         return False, "Update failed: %s" % exc

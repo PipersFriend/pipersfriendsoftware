@@ -1,4 +1,4 @@
-"""Bagpipe Music Writer (.bww) import / export for The Piper's Friend.
+"""Bagpipe Music Writer (.bww) import / export for Taorluath.
 
 This targets the real BWW text format used by Bagpipe Music Writer / Bagpipe
 Reader so that exported files open in that software (and real .bww files import

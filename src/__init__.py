@@ -1,1 +1,1 @@
-"""Piper's Friend source package."""
+"""Taorluath source package."""

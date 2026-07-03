@@ -1,4 +1,4 @@
-"""Firestore-backed activation / licensing for The Piper's Friend.
+"""Firestore-backed activation / licensing for Taorluath.
 
 Activation flow (web-style Firestore REST, stdlib only):
   1. GET   licenses/<key>                 -> 404 = invalid key
